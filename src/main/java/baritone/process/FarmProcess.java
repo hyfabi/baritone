@@ -19,6 +19,7 @@ package baritone.process;
 
 import baritone.Baritone;
 import baritone.api.BaritoneAPI;
+import baritone.api.command.datatypes.IDatatypeFor;
 import baritone.api.pathing.goals.Goal;
 import baritone.api.pathing.goals.GoalBlock;
 import baritone.api.pathing.goals.GoalGetToBlock;
@@ -26,10 +27,7 @@ import baritone.api.pathing.goals.GoalComposite;
 import baritone.api.process.IFarmProcess;
 import baritone.api.process.PathingCommand;
 import baritone.api.process.PathingCommandType;
-import baritone.api.utils.BetterBlockPos;
-import baritone.api.utils.RayTraceUtils;
-import baritone.api.utils.Rotation;
-import baritone.api.utils.RotationUtils;
+import baritone.api.utils.*;
 import baritone.api.utils.input.Input;
 import baritone.pathing.movement.MovementHelper;
 import baritone.utils.BaritoneProcessHelper;
@@ -55,11 +53,9 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 public final class FarmProcess extends BaritoneProcessHelper implements IFarmProcess {
 
@@ -70,6 +66,8 @@ public final class FarmProcess extends BaritoneProcessHelper implements IFarmPro
 
     private int range;
     private BlockPos center;
+
+    private List<HarvestAble> harvestAbles = new ArrayList<>();
 
     private static final List<Item> FARMLAND_PLANTABLE = Arrays.asList(
             Items.BEETROOT_SEEDS,
@@ -108,7 +106,7 @@ public final class FarmProcess extends BaritoneProcessHelper implements IFarmPro
     }
 
     @Override
-    public void farm(int range, BlockPos pos) {
+    public void farm(int range, BlockPos pos, String... harvestAbles) {
         if (pos == null) {
             center = baritone.getPlayerContext().playerFeet();
         } else {
@@ -117,9 +115,14 @@ public final class FarmProcess extends BaritoneProcessHelper implements IFarmPro
         this.range = range;
         active = true;
         locations = null;
+
+        this.harvestAbles = harvestAbles.length == 0 ?
+                new ArrayList<>(List.of(HarvestAble.values())) :
+                Arrays.stream(harvestAbles).map(HarvestAble::getFromString).collect(Collectors.toList());
+        logDirect(harvestAbles.length+"");
     }
 
-    private enum Harvest {
+    public enum HarvestAble {
         WHEAT((CropBlock) Blocks.WHEAT),
         CARROTS((CropBlock) Blocks.CARROTS),
         POTATOES((CropBlock) Blocks.POTATOES),
@@ -149,12 +152,12 @@ public final class FarmProcess extends BaritoneProcessHelper implements IFarmPro
         public final Block block;
         public final Predicate<BlockState> readyToHarvest;
 
-        Harvest(CropBlock blockCrops) {
+        HarvestAble(CropBlock blockCrops) {
             this(blockCrops, blockCrops::isMaxAge);
             // max age is 7 for wheat, carrots, and potatoes, but 3 for beetroot
         }
 
-        Harvest(Block block, Predicate<BlockState> readyToHarvest) {
+        HarvestAble(Block block, Predicate<BlockState> readyToHarvest) {
             this.block = block;
             this.readyToHarvest = readyToHarvest;
         }
@@ -162,12 +165,16 @@ public final class FarmProcess extends BaritoneProcessHelper implements IFarmPro
         public boolean readyToHarvest(Level world, BlockPos pos, BlockState state) {
             return readyToHarvest.test(state);
         }
+
+        public static HarvestAble getFromString(String string){
+            return Arrays.stream(values()).filter(harvestAble -> harvestAble.block.builtInRegistryHolder().key().location().toString().equals(string)).toList().get(0);
+        }
     }
 
     private boolean readyForHarvest(Level world, BlockPos pos, BlockState state) {
-        for (Harvest harvest : Harvest.values()) {
-            if (harvest.block == state.getBlock()) {
-                return harvest.readyToHarvest(world, pos, state);
+        for (HarvestAble harvestAble : HarvestAble.values()) {
+            if (harvestAble.block == state.getBlock()) {
+                return harvestAble.readyToHarvest(world, pos, state);
             }
         }
         return false;
@@ -192,8 +199,10 @@ public final class FarmProcess extends BaritoneProcessHelper implements IFarmPro
     @Override
     public PathingCommand onTick(boolean calcFailed, boolean isSafeToCancel) {
         ArrayList<Block> scan = new ArrayList<>();
-        for (Harvest harvest : Harvest.values()) {
-            scan.add(harvest.block);
+
+        //TODO: Specify Harvest
+        for (HarvestAble harvestAble : this.harvestAbles) {
+            scan.add(harvestAble.block);
         }
         if (Baritone.settings().replantCrops.value) {
             scan.add(Blocks.FARMLAND);
@@ -351,8 +360,7 @@ public final class FarmProcess extends BaritoneProcessHelper implements IFarmPro
             }
         }
         for (Entity entity : ctx.entities()) {
-            if (entity instanceof ItemEntity && entity.isOnGround()) {
-                ItemEntity ei = (ItemEntity) entity;
+            if (entity instanceof ItemEntity ei && entity.isOnGround()) {
                 if (PICKUP_DROPPED.contains(ei.getItem().getItem())) {
                     // +0.1 because of farmland's 0.9375 dummy height lol
                     goalz.add(new GoalBlock(new BetterBlockPos(entity.position().x, entity.position().y + 0.1, entity.position().z)));

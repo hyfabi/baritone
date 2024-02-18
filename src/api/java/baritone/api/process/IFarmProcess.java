@@ -17,7 +17,10 @@
 
 package baritone.api.process;
 
+import baritone.api.command.datatypes.IDatatypeFor;
+import baritone.api.utils.BlockOptionalMeta;
 import net.minecraft.core.BlockPos;
+import org.jetbrains.annotations.Nullable;
 
 public interface IFarmProcess extends IBaritoneProcess {
 
@@ -28,12 +31,12 @@ public interface IFarmProcess extends IBaritoneProcess {
      * @param range The distance from center to farm from
      * @param pos   The center position to base the range from
      */
-    void farm(int range, BlockPos pos);
+    void farm(int range, BlockPos pos, String ...harvestAbles);
 
     /**
      * Begin to search for nearby crops to farm.
      */
-    default void farm() {farm(0, null);}
+    default void farm() {farm(0, null, "" );}
 
     /**
      * Begin to search for crops to farm with in specified aria
@@ -41,5 +44,6 @@ public interface IFarmProcess extends IBaritoneProcess {
      *
      * @param range The distance to search for crops to farm
      */
-    default void farm(int range) {farm(range, null);}
+    default void farm(int range) {farm(range, null, "");}
 }
+

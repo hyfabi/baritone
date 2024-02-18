@@ -21,11 +21,18 @@ import baritone.api.IBaritone;
 import baritone.api.cache.IWaypoint;
 import baritone.api.command.Command;
 import baritone.api.command.argument.IArgConsumer;
+import baritone.api.command.datatypes.ForBlockOptionalMeta;
 import baritone.api.command.datatypes.ForWaypoints;
+import baritone.api.command.datatypes.IDatatypeFor;
 import baritone.api.command.exception.CommandException;
 import baritone.api.command.exception.CommandInvalidStateException;
 import baritone.api.utils.BetterBlockPos;
+import baritone.api.utils.BlockOptionalMeta;
+import baritone.process.FarmProcess;
+import net.minecraft.world.level.block.Block;
 
+import javax.annotation.Nullable;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Stream;
@@ -38,36 +45,45 @@ public class FarmCommand extends Command {
 
     @Override
     public void execute(String label, IArgConsumer args) throws CommandException {
-        args.requireMax(2);
-        int range = 0;
+
+        Integer range = null;
         BetterBlockPos origin = null;
-        //range
-        if (args.has(1)) {
-            range = args.getAs(Integer.class);
-        }
         //waypoint
         if (args.has(1)) {
-            IWaypoint[] waypoints = args.getDatatypeFor(ForWaypoints.INSTANCE);
-            IWaypoint waypoint = null;
-            switch (waypoints.length) {
-                case 0:
-                    throw new CommandInvalidStateException("No waypoints found");
-                case 1:
-                    waypoint = waypoints[0];
-                    break;
-                default:
-                    throw new CommandInvalidStateException("Multiple waypoints were found");
+            range = args.getAsOrDefault(Integer.class, null);
+            if(range != null && range < 0){
+                IWaypoint[] waypoints = args.getDatatypeFor(ForWaypoints.INSTANCE);
+                IWaypoint waypoint = null;
+                switch (waypoints.length) {
+                    case 0:
+                        throw new CommandInvalidStateException("No waypoints found");
+                    case 1:
+                        waypoint = waypoints[0];
+                        break;
+                    default:
+                        throw new CommandInvalidStateException("Multiple waypoints were found");
+                }
+                origin = waypoint.getLocation();
             }
-            origin = waypoint.getLocation();
         }
 
-        baritone.getFarmProcess().farm(range, origin);
+        ArrayList<String> harvestAbles = new ArrayList<>();
+
+        while(args.hasAny()){
+            harvestAbles.add(args.getString());
+        }
+
+        baritone.getFarmProcess().farm(range != null ? range : 100, origin, harvestAbles.toArray(new String[]{}));
         logDirect("Farming");
     }
 
     @Override
     public Stream<String> tabComplete(String label, IArgConsumer args) {
-        return Stream.empty();
+        try{
+            int i = args.peekAs(Integer.class);
+        }catch (Exception ignored){}
+
+        return Stream.of(FarmProcess.HarvestAble.values()).map(e -> e.block.builtInRegistryHolder().key().location().toString());
     }
 
     @Override
