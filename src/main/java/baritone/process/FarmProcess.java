@@ -53,7 +53,9 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
+import javax.annotation.Nullable;
 import java.util.*;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
@@ -66,6 +68,8 @@ public final class FarmProcess extends BaritoneProcessHelper implements IFarmPro
 
     private int range;
     private BlockPos center;
+
+    private final HashMap<BlockPos, HarvestAble> breakedCrops = new HashMap<>();
 
     private List<HarvestAble> harvestAbles = new ArrayList<>();
 
@@ -115,6 +119,7 @@ public final class FarmProcess extends BaritoneProcessHelper implements IFarmPro
         this.range = range;
         active = true;
         locations = null;
+        breakedCrops.clear();
 
         this.harvestAbles = harvestAbles.length == 0 ?
                 new ArrayList<>(List.of(HarvestAble.values())) :
@@ -169,6 +174,9 @@ public final class FarmProcess extends BaritoneProcessHelper implements IFarmPro
         public static HarvestAble getFromString(String string){
             return Arrays.stream(values()).filter(harvestAble -> harvestAble.block.builtInRegistryHolder().key().location().toString().equals(string)).toList().get(0);
         }
+        public static HarvestAble getFromBlock(Block block){
+            return Arrays.stream(values()).filter(harvestAble -> harvestAble.block.equals(block)).toList().get(0);
+        }
     }
 
     private boolean readyForHarvest(Level world, BlockPos pos, BlockState state) {
@@ -200,7 +208,6 @@ public final class FarmProcess extends BaritoneProcessHelper implements IFarmPro
     public PathingCommand onTick(boolean calcFailed, boolean isSafeToCancel) {
         ArrayList<Block> scan = new ArrayList<>();
 
-        //TODO: Specify Harvest
         for (HarvestAble harvestAble : this.harvestAbles) {
             scan.add(harvestAble.block);
         }
@@ -264,13 +271,18 @@ public final class FarmProcess extends BaritoneProcessHelper implements IFarmPro
             }
         }
 
+
+
         baritone.getInputOverrideHandler().clearAllKeys();
+        //Break Crops
         for (BlockPos pos : toBreak) {
             Optional<Rotation> rot = RotationUtils.reachable(ctx, pos);
             if (rot.isPresent() && isSafeToCancel) {
                 baritone.getLookBehavior().updateTarget(rot.get(), true);
                 MovementHelper.switchToBestToolFor(ctx, ctx.world().getBlockState(pos));
                 if (ctx.isLookingAt(pos)) {
+                    //Remember crop kind
+                    breakedCrops.put(pos, getHarvestAbleFromPos(pos));
                     baritone.getInputOverrideHandler().setInputForceState(Input.CLICK_LEFT, true);
                 }
                 return new PathingCommand(null, PathingCommandType.REQUEST_PAUSE);
@@ -278,10 +290,32 @@ public final class FarmProcess extends BaritoneProcessHelper implements IFarmPro
         }
         ArrayList<BlockPos> both = new ArrayList<>(openFarmland);
         both.addAll(openSoulsand);
+        //Replant
         for (BlockPos pos : both) {
             boolean soulsand = openSoulsand.contains(pos);
             Optional<Rotation> rot = RotationUtils.reachableOffset(ctx, pos, new Vec3(pos.getX() + 0.5, pos.getY() + 1, pos.getZ() + 0.5), ctx.playerController().getBlockReachDistance(), false);
-            if (rot.isPresent() && isSafeToCancel && baritone.getInventoryBehavior().throwaway(true, soulsand ? this::isNetherWart : this::isPlantable)) {
+
+            //Get remembered plant
+
+            Predicate<ItemStack> callback = this::isPlantable;
+
+            HarvestAble toReplant = breakedCrops.get(pos.above());
+            if(toReplant != null){
+                callback = itemStack -> switch (toReplant){
+                    case CARROTS -> itemStack.getItem().equals(Items.CARROT);
+                    case WHEAT -> itemStack.getItem().equals(Items.WHEAT_SEEDS);
+                    case POTATOES -> itemStack.getItem().equals(Items.POTATO);
+                    case BEETROOT -> itemStack.getItem().equals(Items.BEETROOT_SEEDS);
+                    default -> false;
+                };
+            }
+
+            if(soulsand) {
+                callback = this::isNetherWart;
+            }
+
+            //Execute plant
+            if (rot.isPresent() && isSafeToCancel && baritone.getInventoryBehavior().throwaway(true, callback)) {
                 HitResult result = RayTraceUtils.rayTraceTowards(ctx.player(), rot.get(), ctx.playerController().getBlockReachDistance());
                 if (result instanceof BlockHitResult && ((BlockHitResult) result).getDirection() == Direction.UP) {
                     baritone.getLookBehavior().updateTarget(rot.get(), true);
@@ -292,6 +326,7 @@ public final class FarmProcess extends BaritoneProcessHelper implements IFarmPro
                 }
             }
         }
+        //Coca beans
         for (BlockPos pos : openLog) {
             for (Direction dir : Direction.Plane.HORIZONTAL) {
                 if (!(ctx.world().getBlockState(pos.relative(dir)).getBlock() instanceof AirBlock)) {
@@ -311,6 +346,8 @@ public final class FarmProcess extends BaritoneProcessHelper implements IFarmPro
                 }
             }
         }
+
+        //Bonemeal
         for (BlockPos pos : bonemealable) {
             Optional<Rotation> rot = RotationUtils.reachable(ctx, pos);
             if (rot.isPresent() && isSafeToCancel && baritone.getInventoryBehavior().throwaway(true, this::isBoneMeal)) {
@@ -368,6 +405,10 @@ public final class FarmProcess extends BaritoneProcessHelper implements IFarmPro
             }
         }
         return new PathingCommand(new GoalComposite(goalz.toArray(new Goal[0])), PathingCommandType.SET_GOAL_AND_PATH);
+    }
+
+    private @Nullable HarvestAble getHarvestAbleFromPos(BlockPos blockPos){
+        return HarvestAble.getFromBlock(ctx.world().getBlockState(blockPos).getBlock());
     }
 
     @Override
